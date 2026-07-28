@@ -222,9 +222,9 @@
 </div>
 
 <script>
-// Replace this with your deployed Google Apps Script web-app URL after you publish the script.
+// Replace this with a Formspree endpoint, Apps Script web app URL, or any other POST endpoint.
 const params = new URLSearchParams(window.location.search);
-const SHEET_WEBHOOK_URL = (params.get('webhook') || window.SHEET_WEBHOOK_URL || "PASTE_YOUR_APPS_SCRIPT_URL_HERE").trim();
+const SUBMISSION_ENDPOINT_URL = (params.get('webhook') || params.get('endpoint') || window.SHEET_WEBHOOK_URL || window.SUBMISSION_ENDPOINT_URL || "PASTE_YOUR_SUBMISSION_URL_HERE").trim();
 const LOCAL_QUEUE_KEY = "hot-smoked-quiz-responses";
 
 function savePendingResponse(payload) {
@@ -238,16 +238,19 @@ function savePendingResponse(payload) {
 }
 
 async function submitResponse(payload) {
-  if (!SHEET_WEBHOOK_URL || SHEET_WEBHOOK_URL.includes("PASTE_")) {
+  if (!SUBMISSION_ENDPOINT_URL || SUBMISSION_ENDPOINT_URL.includes("PASTE_")) {
     savePendingResponse(payload);
     return { ok: false, queued: true };
   }
   try {
-    await fetch(SHEET_WEBHOOK_URL, {
+    const formData = new URLSearchParams();
+    Object.entries(payload).forEach(([key, value]) => {
+      formData.append(key, value ?? "");
+    });
+    await fetch(SUBMISSION_ENDPOINT_URL, {
       method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+      body: formData.toString()
     });
     return { ok: true, queued: false };
   } catch (err) {
@@ -400,9 +403,9 @@ function renderLocationGate(){
       };
       const result = await submitResponse(payload);
       if(result.ok){
-        statusMsg.textContent = "Response saved to your Google Sheet.";
+        statusMsg.textContent = "Response submitted successfully.";
       } else {
-        statusMsg.textContent = "Response queued locally and will sync when the Google Sheet endpoint is ready.";
+        statusMsg.textContent = "Response queued locally and will sync when your submission endpoint is ready.";
       }
     } catch(err){
       statusMsg.textContent = "Couldn't save, but here's your result anyway.";
