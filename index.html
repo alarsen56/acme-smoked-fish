@@ -378,26 +378,38 @@ function savePendingResponse(payload) {
     const existing = JSON.parse(localStorage.getItem(LOCAL_QUEUE_KEY) || "[]");
     existing.push(payload);
     localStorage.setItem(LOCAL_QUEUE_KEY, JSON.stringify(existing));
+    return true;
   } catch (error) {
     console.warn("Could not save pending response", error);
+    return false;
   }
 }
 
 async function submitResponse(payload) {
   if (!SUBMISSION_ENDPOINT_URL || SUBMISSION_ENDPOINT_URL.includes("PASTE_")) {
-    savePendingResponse(payload);
-    return { ok: false, queued: true };
+    return { ok: false, queued: savePendingResponse(payload), configured: false };
   }
 
   try {
-    const formData = new URLSearchParams();
-    Object.entries(payload).forEach(([key, value]) => {
-      formData.append(key, value ?? "");
-    });
+    const isFormspree = new URL(SUBMISSION_ENDPOINT_URL).hostname === "formspree.io";
+    const headers = isFormspree
+      ? { "Accept": "application/json", "Content-Type": "application/json" }
+      : { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" };
+    let body;
+    if (isFormspree) {
+      body = JSON.stringify(payload);
+    } else {
+      const formData = new URLSearchParams();
+      Object.entries(payload).forEach(([key, value]) => {
+        formData.append(key, value ?? "");
+      });
+      body = formData.toString();
+    }
+
     const response = await fetch(SUBMISSION_ENDPOINT_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-      body: formData.toString()
+      headers,
+      body
     });
     if (!response.ok) {
       throw new Error(`Submission failed with status ${response.status}`);
@@ -405,8 +417,7 @@ async function submitResponse(payload) {
     return { ok: true, queued: false };
   } catch (error) {
     console.warn("Could not submit quiz response", error);
-    savePendingResponse(payload);
-    return { ok: false, queued: true };
+    return { ok: false, queued: savePendingResponse(payload), configured: true };
   }
 }
 
@@ -500,7 +511,6 @@ function renderLocationGate(){
     locationValue = retailerValue + ', ' + cityValue;
     submitBtn.disabled = true;
     submitBtn.textContent = "Saving...";
-    const statusMsg = card.querySelector('#statusMsg');
     const timestamp = new Date().toISOString();
     const payload = {
       city: cityValue,
@@ -514,15 +524,19 @@ function renderLocationGate(){
       ts: timestamp
     };
     const result = await submitResponse(payload);
-    if (!result.ok) {
-      statusMsg.textContent = "Couldn't submit, but here's your result anyway.";
-    }
-    renderResult();
+    renderResult(result);
   });
 }
 
-function renderResult(){
+function renderResult(submissionResult){
   const f = FLAVORS[topFlavor];
+  const submissionMessage = submissionResult.ok
+    ? `Your response was submitted. Thanks for sharing where you'd like to shop for Sauced Salmon Filets: <strong>${esc(retailerValue)}</strong> in <strong>${esc(cityValue)}</strong>.`
+    : !submissionResult.configured
+      ? "Your result is ready, but no submission endpoint is configured. Your response was saved only in this browser."
+      : submissionResult.queued
+        ? "Your result is ready, but we couldn't send your response to Formspree. It was saved only in this browser and will not appear in Formspree."
+        : "Your result is ready, but we couldn't send or save your response. Please try again later.";
   card.classList.add('result-card');
   document.getElementById('pageTagline').textContent = 'You are...';
   card.innerHTML = `
@@ -546,7 +560,7 @@ function renderResult(){
         <span>✓ 12g protein</span>
         <span>✓ Delicious!</span>
       </div>
-      <div class="status-msg" style="margin: 14px 0 16px;">Thanks for the tip, we're taking notes on where to show up next: <strong>${esc(retailerValue)}</strong> in <strong>${esc(cityValue)}</strong>.</div>
+      <div class="status-msg" style="margin: 14px 0 16px;">${submissionMessage}</div>
       <button class="btn-secondary" id="restart">Take the quiz again</button>
       <div class="flame">Smoked. Sauced. Served.</div>
     </div>
